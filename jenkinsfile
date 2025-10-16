@@ -1,0 +1,103 @@
+pipeline {
+  agent any
+
+  triggers {
+    githubPush()
+  }
+
+  environment {
+    IMAGE_TAG = "build-${new Date().format('yyyyMMdd-HHmmss')}"
+    DOCKER_HUB_REPO = "nikitha163/sujitha-project"
+    ECR_REPO = "636768524979.dkr.ecr.af-south-1.amazonaws.com/nikitha-capgemini"
+    AWS_REGION = "af-south-1"
+    CLUSTER_NAME = "nikitha-test-cluster"
+  }
+
+  stages {
+    stage('Checkout Code') {
+      steps {
+        git branch: 'master', url: 'https://github.com/Nikitha-164/Sujitha-Project1.git'
+      }
+    }
+
+    stage('Build Docker Image') {
+      steps {
+        sh "docker build -t $DOCKER_HUB_REPO:$IMAGE_TAG ."
+      }
+    }
+
+    stage('Login to Docker Hub') {
+      steps {
+        withCredentials([usernamePassword(credentialsId: 'Docker_Credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+          sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
+        }
+      }
+    }
+
+    stage('Push to Docker Hub') {
+      steps {
+        sh "docker push $DOCKER_HUB_REPO:$IMAGE_TAG"
+      }
+    }
+
+    stage('Login to AWS ECR') {
+      steps {
+        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'AWS_Credentials']]) {
+          sh '''
+            aws ecr get-login-password --region $AWS_REGION | \
+            docker login --username AWS --password-stdin $ECR_REPO
+          '''
+        }
+      }
+    }
+
+    stage('Tag and Push to ECR') {
+      steps {
+        sh '''
+          docker tag $DOCKER_HUB_REPO:$IMAGE_TAG $ECR_REPO:$IMAGE_TAG
+          docker push $ECR_REPO:$IMAGE_TAG
+        '''
+      }
+    }
+
+    stage('Deploy Container') {
+  steps {
+    script {
+      
+      sh "docker ps -q --filter 'publish=3001' | xargs -r docker rm -f"
+
+      
+      sh "docker rm -f sujitha-container || true"
+      sh "docker run -d --name sujitha-container -p 3001:3000 $ECR_REPO:$IMAGE_TAG"
+    }
+  }
+}
+
+    stage('Deploy to Kubernetes') {
+      steps {
+        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'AWS_Credentials']]) {
+          script {
+            sh '''
+              aws eks update-kubeconfig --name nikitha-test-cluster --region ${AWS_REGION}
+              kubectl apply -f deployment.yaml
+              kubectl apply -f mongodb-deployment.yaml
+            '''
+          }
+        }
+      }
+    }
+  }
+
+  post {
+    success {
+      echo '✅ Deployment successfully complete.'
+    }
+    failure {
+      echo '❌ Deployment failed.'
+    }
+    cleanup {
+      echo '🧹 Cleaning up workspace...'
+      cleanWs()
+    }
+  }
+}
