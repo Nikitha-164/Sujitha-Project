@@ -1,101 +1,98 @@
 pipeline {
-  agent any
+    agent any
 
-  
-
-  environment {
-    IMAGE_TAG = "build-${new Date().format('yyyyMMdd-HHmmss')}"
-    DOCKER_HUB_REPO = "nikitha163/sujitha-project"
-    ECR_REPO = "636768524979.dkr.ecr.af-south-1.amazonaws.com/nikitha-capgemini"
-    AWS_REGION = "af-south-1"
-    CLUSTER_NAME = "nikitha-test-cluster"
-  }
-
-  stages {
-    stage('Checkout Code') {
-      steps {
-        git branch: 'master', url: 'https://github.com/Nikitha-164/Sujitha-Project1.git'
-      }
+    parameters {
+        string(name: 'IMAGE_TAG', defaultValue: 'latest', description: 'Docker image tag')
+        string(name: 'CONTAINER_NAME', defaultValue: 'cap-sujitha-container', description: 'Docker container name')
+        string(name: 'HOST_PORT', defaultValue: '3000', description: 'Host port to expose the container')
     }
 
-    stage('Build Docker Image') {
-      steps {
-        sh "docker build -t $DOCKER_HUB_REPO:$IMAGE_TAG ."
-      }
+    environment {
+        DOCKER_IMAGE = "cap-sujitha:${params.IMAGE_TAG}"
+        DOCKER_HUB_REPO = "nikitha163/sujitha-project"
+        ECR_REPO = "636768524979.dkr.ecr.af-south-1.amazonaws.com/nikitha-capgemini"
+        AWS_REGION = "af-south-1"
+        CONTAINER_PORT = "3000"
     }
 
-    stage('Login to Docker Hub') {
-      steps {
-        withCredentials([usernamePassword(credentialsId: 'Docker_Credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-          sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
+    stages {
+        stage('Clone Repository') {
+            steps {
+                git branch: 'master', url: 'https://github.com/Nikitha-164/Sujitha-Project.git'
+            }
         }
-      }
-    }
 
-    stage('Push to Docker Hub') {
-      steps {
-        sh "docker push $DOCKER_HUB_REPO:$IMAGE_TAG"
-      }
-    }
-
-    stage('Login to AWS ECR') {
-      steps {
-        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'AWS_Credentials']]) {
-          sh '''
-            aws ecr get-login-password --region $AWS_REGION | \
-            docker login --username AWS --password-stdin $ECR_REPO
-          '''
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    docker.build("${DOCKER_IMAGE}")
+                }
+            }
         }
-      }
+
+        stage('Push to Docker Hub') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'docker_credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                    script {
+                        sh """
+                            echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+                            docker tag ${DOCKER_IMAGE} ${DOCKER_HUB_REPO}:${params.IMAGE_TAG}
+                            docker push ${DOCKER_HUB_REPO}:${params.IMAGE_TAG}
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('Push to AWS ECR') {
+            steps {
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws_credentials']]) {
+                    script {
+                        sh """
+                            aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REPO}
+                            docker tag ${DOCKER_IMAGE} ${ECR_REPO}:${params.IMAGE_TAG}
+                            docker push ${ECR_REPO}:${params.IMAGE_TAG}
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('Run Docker Container') {
+            steps {
+                script {
+                    sh """
+                        docker run -d --name ${params.CONTAINER_NAME} -p ${params.HOST_PORT}:${CONTAINER_PORT} ${DOCKER_IMAGE}
+                    """
+                }
+            }
+        }
+
+        stage('Deploy to Kubernetes') {
+            steps {
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws_credentials']]) {
+                    script {
+                        sh """
+                            aws eks update-kubeconfig --name Sujitha-app-cluster --region ${AWS_REGION}
+                            kubectl apply -f deployment.yaml
+                            kubectl apply -f mongo-deployment.yaml
+                        """
+                    }
+                }
+            }
+        }
     }
 
-    stage('Tag and Push to ECR') {
-      steps {
-        sh '''
-          docker tag $DOCKER_HUB_REPO:$IMAGE_TAG $ECR_REPO:$IMAGE_TAG
-          docker push $ECR_REPO:$IMAGE_TAG
-        '''
-      }
+    post {
+        success {
+            echo "Pipeline completed successfully!"
+        }
+        failure {
+            echo "Pipeline failed. Check logs for details."
+        }
+        always {
+            echo "Cleaning up..."
+        }
     }
-
-    stage('Deploy Container') {
-  steps {
-    script {
-      
-      sh "docker ps -q --filter 'publish=3001' | xargs -r docker rm -f"
-
-      
-      sh "docker rm -f sujitha-container || true"
-      sh "docker run -d --name sujitha-container -p 3001:3000 $ECR_REPO:$IMAGE_TAG"
-    }
-  }
 }
-
-    stage('Deploy to Kubernetes') {
-      steps {
-        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'AWS_Credentials']]) {
-          script {
-            sh '''
-              aws eks update-kubeconfig --name nikitha-test-cluster --region ${AWS_REGION}
-              kubectl apply -f deployment.yaml
-              kubectl apply -f mongodb-deployment.yaml
-            '''
-          }
-        }
-      }
-    }
-  }
-
-  post {
-    success {
-      echo '✅ Deployment successfully complete.'
-    }
-    failure {
-      echo '❌ Deployment failed.'
-    }
-    cleanup {
-      echo '🧹 Cleaning up workspace...'
-      cleanWs()
-    }
-  }
-}
+ 
