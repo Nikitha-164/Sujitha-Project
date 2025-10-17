@@ -70,7 +70,7 @@ pipeline {
 
         stage('Deploy to Kubernetes') {
             steps {
-                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws_credentials']]) {
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'AWS_Credentials']]) {
                     script {
                         sh """
                             aws eks update-kubeconfig --name Sujitha-app-cluster --region ${AWS_REGION}
