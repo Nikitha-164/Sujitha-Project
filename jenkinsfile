@@ -91,7 +91,7 @@ pipeline {
             echo "Pipeline failed. Check logs for details."
         }
         always {
-            echo "Cleaning up..."
+            echo "Cleaning up.."
         }
     }
 }
