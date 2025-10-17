@@ -75,7 +75,7 @@ pipeline {
                         sh """
                             aws eks update-kubeconfig --name Sujitha-app-cluster --region ${AWS_REGION}
                             kubectl apply -f deployment.yaml
-                            kubectl apply -f mongo-deployment.yaml
+                            kubectl apply -f mongodb-deployment.yaml
                         """
                     }
                 }
