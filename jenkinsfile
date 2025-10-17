@@ -1,9 +1,7 @@
 pipeline {
   agent any
 
-  triggers {
-    githubPush()
-  }
+  
 
   environment {
     IMAGE_TAG = "build-${new Date().format('yyyyMMdd-HHmmss')}"
